@@ -1,0 +1,38 @@
+{
+  "name": "debate_to_consensus",
+  "description": "Query a panel of open-weight LLMs with the same prompt, run debate rounds where each model critiques the others and revises, and return the consensus answer. Use for hard, high-stakes, or contested questions where you want to reduce single-model bias or hallucination, or when a second/third opinion is valuable. Note: consensus cancels independent errors but not errors all panelists share.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "description": "The question or task for the panel to answer."
+      },
+      "panel": {
+        "type": "string",
+        "description": "Panel selection: a preset ('default', 'cheap', 'reasoning') or a comma-separated list of OpenRouter model slugs.",
+        "default": "default"
+      },
+      "max_rounds": {
+        "type": "integer",
+        "description": "Maximum number of debate rounds after the independent first round.",
+        "default": 3
+      },
+      "consensus": {
+        "type": "string",
+        "description": "Stop rule: 'all' (unanimous), 'majority', a count like '2', or a fraction like '2/3' or '0.66'.",
+        "default": "majority"
+      },
+      "synthesize": {
+        "type": "boolean",
+        "description": "If true, merge the converged answers into one canonical reply (one extra model call).",
+        "default": false
+      }
+    },
+    "required": ["prompt"]
+  },
+  "invocation": {
+    "note": "Register this schema with your harness, and route calls to skills/hermes/run.py. The harness should serialize the arguments as JSON and pipe them to: `python run.py --json-stdin`. The tool prints a JSON object with keys: consensus_reply, reached_consensus, status, rounds_used, dissenters, dropped.",
+    "command": ["python", "run.py", "--json-stdin"]
+  }
+}

@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.env
+
+# Benchmark run artifacts (keep the committed reference run under results/quick/)
+benchmark/results/*/rows.json
+benchmark/results/latest/
+*.log
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

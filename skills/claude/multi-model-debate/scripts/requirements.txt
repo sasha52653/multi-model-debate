@@ -1,0 +1,6 @@
+# The debate engine uses only the Python standard library — no install required.
+# Set OPENROUTER_API_KEY in the environment before running.
+#
+# Optional: if you prefer the official OpenAI SDK pointed at OpenRouter instead of
+# the bundled urllib client, install this and adapt openrouter.py accordingly.
+# openai>=1.0

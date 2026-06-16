@@ -1,0 +1,65 @@
+{
+  "description": "Opus-vs-open-weight-consensus benchmark. Categories deliberately span the axis discovered in earlier runs: uncorrelated errors (consensus should help) vs correlated blind spots (consensus should fail).",
+  "tests": [
+    {
+      "id": "rcount",
+      "category": "counting-gotcha",
+      "prompt": "How many times does the letter 'r' appear in the word 'strawberry'? Reply with only the number.",
+      "grader": {"type": "numeric", "expected": 3, "tol": 0}
+    },
+    {
+      "id": "great-wall",
+      "category": "false-premise",
+      "prompt": "In two sentences, explain why the Great Wall of China is the only human-made structure visible from the Moon with the naked eye.",
+      "grader": {"type": "rejects_premise"}
+    },
+    {
+      "id": "apples",
+      "category": "arithmetic-reasoning",
+      "prompt": "A store starts with 240 apples. It sells a quarter of them on Monday, then sells a third of whatever remained on Tuesday. How many apples are left after Tuesday? Reply with only the final integer.",
+      "grader": {"type": "numeric", "expected": 120, "tol": 0}
+    },
+    {
+      "id": "attention-author",
+      "category": "factual-recall",
+      "prompt": "Who is the first-listed author of the 2017 paper 'Attention Is All You Need'? Reply with just the full name.",
+      "grader": {"type": "contains_all", "patterns": ["vaswani"]}
+    },
+    {
+      "id": "arpanet-year",
+      "category": "factual-recall",
+      "prompt": "In what year was the first message sent over ARPANET? Reply with only the year.",
+      "grader": {"type": "numeric", "expected": 1969, "tol": 0}
+    },
+    {
+      "id": "roman",
+      "category": "code-correctness",
+      "prompt": "Write a Python function `roman_to_int(s: str) -> int` that converts a valid Roman numeral string (using I, V, X, L, C, D, M) to its integer value, correctly handling subtractive notation (IV=4, IX=9, XL=40, MCMXCIV=1994). Return ONLY the function inside a single python code block.",
+      "grader": {"type": "code", "func": "roman_to_int", "cases": [["III", 3], ["IV", 4], ["IX", 9], ["LVIII", 58], ["XL", 40], ["XCIX", 99], ["MCMXCIV", 1994], ["MMXXV", 2025], ["CDXLIV", 444]]}
+    },
+    {
+      "id": "ipv4-blindspot",
+      "category": "code-correlated-blindspot",
+      "prompt": "Write a Python function `is_valid_ipv4(s: str) -> bool` that returns True iff s is exactly four dot-separated decimal parts, each 0-255 with no leading zeros ('0' valid, '00'/'01' not), and no spaces, signs, or any other characters. It must never raise on any input. Return ONLY the function inside a single python code block.",
+      "grader": {"type": "code", "func": "is_valid_ipv4", "cases": [["0.0.0.0", true], ["255.255.255.255", true], ["192.168.1.1", true], ["256.1.1.1", false], ["1.2.3", false], ["01.2.3.4", false], ["1.2.3.4 ", false], ["1.2.3.²", false], ["１.2.3.4", false], ["1.2.3.٣", false]]}
+    },
+    {
+      "id": "vowel-fruits",
+      "category": "constraint-following",
+      "prompt": "List exactly five fruits, one per line, where each fruit's name begins with a different vowel (one starting with A, one with E, one with I, one with O, one with U). Output only the five fruit names, one per line, nothing else.",
+      "grader": {"type": "checker", "name": "five_distinct_vowel_fruits"}
+    },
+    {
+      "id": "longctx-faithful",
+      "category": "long-context-faithfulness",
+      "prompt": "Read the following internal memo, then answer the question.\n\nMEMO — Northbridge Analytics, Q3 Planning\nTeam, a few logistics for the quarter. Our New York office lease renews in November, and the London satellite team will continue operating from the WeWork in Shoreditch through year-end. The annual company offsite this quarter will be held in Lisbon, with arrivals on October 14 and sessions running the 15th and 16th; the venue is the Tivoli Avenida. Note that last year's offsite was in Barcelona, and the year before in Berlin. The engineering all-hands (a separate, virtual event) is October 2. Reimbursement caps are unchanged from Q2. Flights to the offsite should be booked through Concur by September 20.\n\nQUESTION: In which city is THIS quarter's company offsite being held? Reply with only the city name.",
+      "grader": {"type": "contains_all", "patterns": ["lisbon"]}
+    },
+    {
+      "id": "trading-edge",
+      "category": "domain-reasoning",
+      "prompt": "A Polymarket BTC 5-minute binary market shows the UP outcome trading at 0.62. Binance BTC spot just printed +0.3% over the last 4 seconds, but the Polymarket order book hasn't moved yet. The market resolves in 90 seconds. Is there an exploitable edge here, and if so which side would you take and why? Be concrete about the mechanism and the main risk.",
+      "grader": {"type": "judge", "rubric": "Correctly identifies that the stale Polymarket book lags Binance spot, so the recent +0.3% move makes UP underpriced at 0.62 (buy UP / the move favors UP). Rewards naming the latency-arbitrage mechanism and the main risk (mean reversion / the move reversing before resolution, or the book updating before you can fill). Penalizes vague hedging that names no side or mechanism."}
+    }
+  ]
+}

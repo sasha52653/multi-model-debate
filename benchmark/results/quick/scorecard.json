@@ -1,0 +1,103 @@
+{
+  "meta": {
+    "opus": "anthropic/claude-opus-4.8",
+    "panel": [
+      "qwen/qwen3-235b-a22b-2507",
+      "deepseek/deepseek-r1-0528",
+      "moonshotai/kimi-k2.5",
+      "z-ai/glm-5"
+    ],
+    "judge": "google/gemini-2.5-pro",
+    "repeats": 1,
+    "consensus_rule": "majority"
+  },
+  "summary": {
+    "categories": {
+      "counting-gotcha": {
+        "n": 1,
+        "opus_pass_rate": 1.0,
+        "consensus_pass_rate": 1.0,
+        "avg_opus_latency_s": 2.0,
+        "avg_consensus_latency_s": 115.6,
+        "avg_consensus_calls": 9.0
+      },
+      "false-premise": {
+        "n": 1,
+        "opus_pass_rate": 1.0,
+        "consensus_pass_rate": 1.0,
+        "avg_opus_latency_s": 3.4,
+        "avg_consensus_latency_s": 71.1,
+        "avg_consensus_calls": 9.0
+      },
+      "arithmetic-reasoning": {
+        "n": 1,
+        "opus_pass_rate": 1.0,
+        "consensus_pass_rate": 1.0,
+        "avg_opus_latency_s": 1.8,
+        "avg_consensus_latency_s": 76.0,
+        "avg_consensus_calls": 9.0
+      },
+      "factual-recall": {
+        "n": 2,
+        "opus_pass_rate": 1.0,
+        "consensus_pass_rate": 1.0,
+        "avg_opus_latency_s": 3.8,
+        "avg_consensus_latency_s": 38.5,
+        "avg_consensus_calls": 9.0
+      },
+      "code-correctness": {
+        "n": 1,
+        "opus_pass_rate": 1.0,
+        "consensus_pass_rate": 1.0,
+        "avg_opus_latency_s": 5.6,
+        "avg_consensus_latency_s": 229.3,
+        "avg_consensus_calls": 9.0
+      },
+      "code-correlated-blindspot": {
+        "n": 1,
+        "opus_pass_rate": 1.0,
+        "consensus_pass_rate": 0.0,
+        "avg_opus_latency_s": 3.1,
+        "avg_consensus_latency_s": 1000.4,
+        "avg_consensus_calls": 13.0
+      },
+      "constraint-following": {
+        "n": 1,
+        "opus_pass_rate": 1.0,
+        "consensus_pass_rate": 1.0,
+        "avg_opus_latency_s": 3.0,
+        "avg_consensus_latency_s": 407.8,
+        "avg_consensus_calls": 13.0
+      },
+      "long-context-faithfulness": {
+        "n": 1,
+        "opus_pass_rate": 1.0,
+        "consensus_pass_rate": 1.0,
+        "avg_opus_latency_s": 2.5,
+        "avg_consensus_latency_s": 29.8,
+        "avg_consensus_calls": 9.0
+      },
+      "domain-reasoning": {
+        "n": 1,
+        "judge_opus_wins": 0,
+        "judge_consensus_wins": 1,
+        "judge_ties": 0,
+        "avg_opus_latency_s": 21.6,
+        "avg_consensus_latency_s": 509.3,
+        "avg_consensus_calls": 13.0
+      }
+    },
+    "overall": {
+      "objective_opus_pass_rate": 1.0,
+      "objective_consensus_pass_rate": 0.889,
+      "objective_n": 9,
+      "judge_opus_wins": 0,
+      "judge_consensus_wins": 1,
+      "judge_ties": 0,
+      "avg_opus_latency_s": 5.1,
+      "avg_consensus_latency_s": 251.6,
+      "avg_consensus_calls": 10.2,
+      "calls_ratio": "10x Opus (1 call)"
+    }
+  }
+}

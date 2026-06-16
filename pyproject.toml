@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "multimodel-debate"
+version = "0.1.0"
+description = "Query a panel of open-weight LLMs on OpenRouter and run debate rounds until they reach consensus."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "Sasha Ivanov" }]
+keywords = ["llm", "openrouter", "ensemble", "consensus", "debate", "multi-agent", "claude", "hermes"]
+# Zero runtime dependencies — the engine uses only the Python standard library.
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/YOUR_USERNAME/multi-model-debate"
+Issues = "https://github.com/YOUR_USERNAME/multi-model-debate/issues"
+
+[project.scripts]
+mmdebate = "multimodel_debate.debate:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["multimodel_debate"]
