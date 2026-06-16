@@ -1,55 +1,79 @@
-# Opus 4.8 vs open-weight consensus — findings
+# Frontier model vs open-weight aggregation — findings
 
-This documents a head-to-head comparison between a single frontier model
-(**Anthropic Claude Opus 4.8**) and a **consensus of open-weight models** debating
-on OpenRouter. It combines a structured benchmark (objective + blind-judged tests)
-with a set of qualitative probes that exposed *when* consensus helps and when it
-doesn't.
+This compares three ways to answer the same question:
 
-**TL;DR:** A diverse open-weight panel reaches near-parity with Opus on objective
-tasks (**89% vs 100%** pass rate) and can even win open-ended judged questions — but
-it has one hard limitation: **consensus cancels errors the models make
-*independently*, and is blind to errors they *share*.** Optimize the panel for
-lineage diversity, and never read unanimous agreement as "verified correct."
+- **opus** — a single frontier model (`anthropic/claude-opus-4.8`), one call.
+- **fusion** — the panel answers independently in parallel, then *one aggregator
+  model fuses* their answers. No debate. (This is the "Mixture-of-Agents" /
+  OpenRouter-Fusion pattern; in this repo it's `--max-rounds 0 --synthesize`.)
+- **debate** — the full engine: independent answers, then rounds of mutual
+  critique and revision until a majority consensus, then synthesize.
+
+It combines a structured benchmark (objective + blind-judged tests) with a set of
+qualitative probes that exposed *when* aggregation helps and when it doesn't.
+
+**TL;DR:**
+1. On objective tasks, **all three tie at 100%** — a diverse open-weight panel,
+   whether fused or debated, matches Opus.
+2. **Fusion ≈ debate in quality, at roughly half the cost and latency.** Debate's
+   extra rounds bought nothing measurable on the objective set; on the one
+   open-ended judged question, debate did win.
+3. The hard limitation is shared by both: **aggregation cancels errors the models
+   make *independently*, and is blind to errors they *share*** — though a small
+   prompt cue can make the panel *see* a blind spot it would otherwise miss.
+
+Optimize for panel diversity; pick fusion for cost, debate for hard reasoning or a
+dissent signal; never read agreement as "verified correct."
 
 ---
 
 ## Setup
 
-- **Frontier contestant:** `anthropic/claude-opus-4.8` (1 call/question, via OpenRouter for a fair comparison).
-- **Consensus panel:** `qwen/qwen3-235b-a22b-2507`, `deepseek/deepseek-r1-0528`, `moonshotai/kimi-k2.5`, `z-ai/glm-5` — four different labs, debating with `--synthesize`, `majority` rule, up to 3 rounds.
-- **Judge (subjective tests):** `google/gemini-2.5-pro` — a neutral third lineage, shown the two answers blind with positions swapped across repeats.
-- **Grading:** objective tests graded by code (numeric / exact / constraint / executed-code); subjective tests by the blind judge.
+- **Panel (fusion & debate):** `qwen/qwen3-235b-a22b-2507`, `deepseek/deepseek-r1-0528`, `moonshotai/kimi-k2.5`, `z-ai/glm-5` — four different labs. Debate uses `majority` consensus, up to 3 rounds; both fusion and debate end with a synthesize step.
+- **Frontier contestant:** `anthropic/claude-opus-4.8`, one call/question, via OpenRouter for a fair comparison.
+- **Judge (subjective tests):** `google/gemini-2.5-pro` — a neutral third lineage, shown all answers blind in rotated order, picking the single best.
+- **Grading:** objective tests by code (numeric / exact / constraint / executed-code); subjective tests by the blind judge.
 
-Reproduce with [`benchmark/run_benchmark.py`](../benchmark/run_benchmark.py).
+Reproduce with [`benchmark/run_benchmark.py`](../benchmark/run_benchmark.py)
+(`--contestants opus,fusion,debate`).
 
 ---
 
-## Benchmark scorecard (10 tests, 1 repeat — "quick pass")
+## Three-way scorecard (10 tests, 1 repeat)
 
-| Category | Test | Opus | Consensus |
-|---|---|:--:|:--:|
-| counting-gotcha | r's in "strawberry" | ✅ | ✅ |
-| false-premise | Great Wall from the Moon | ✅ | ✅ |
-| arithmetic | multi-step apples | ✅ | ✅ |
-| factual-recall | "Attention is All You Need" author | ✅ | ✅ |
-| factual-recall | ARPANET first message year | ✅ | ✅ |
-| code-correctness | `roman_to_int` | ✅ | ✅ |
-| **code blind-spot** | `is_valid_ipv4` (Unicode edge cases) | ✅ | **❌ (7/10 cases)** |
-| constraint-following | five distinct-vowel fruits | ✅ | ✅ |
-| long-context | offsite city w/ distractors | ✅ | ✅ |
-| **domain-reasoning** | Polymarket latency-arb (blind-judged) | — | **🏆 judge preferred consensus** |
+| Category | opus | fusion | debate |
+|---|:--:|:--:|:--:|
+| counting-gotcha (r's in "strawberry") | ✅ | ✅ | ✅ |
+| false-premise (Great Wall from the Moon) | ✅ | ✅ | ✅ |
+| arithmetic (multi-step apples) | ✅ | ✅ | ✅ |
+| factual-recall ×2 (paper author, ARPANET year) | ✅ | ✅ | ✅ |
+| code-correctness (`roman_to_int`) | ✅ | ✅ | ✅ |
+| code blind-spot (`is_valid_ipv4`, Unicode) | ✅ | ✅ | ✅ |
+| constraint-following (distinct-vowel fruits) | ✅ | ✅ | ✅ |
+| long-context (offsite city w/ distractors) | ✅ | ✅ | ✅ |
+| **domain-reasoning** (Polymarket latency-arb, blind-judged) | — | — | **🏆 won** |
 
-**Overall:** Opus objective pass rate **100% (9/9)**; consensus **89% (8/9)**. Blind
-judge on the one subjective question: **consensus 1 – Opus 0**.
+**Objective pass rate:** opus **100%** · fusion **100%** · debate **100%** (9 graded
+runs each). **Blind judge** on the one subjective question: **debate 1**, opus 0,
+fusion 0.
 
-**Cost / latency:** Opus ≈ **5s & 1 call** per question; consensus ≈ **252s & ~10
-calls** per question (≈10× the calls, and far higher wall-clock because the panel
-uses slow reasoning models). *This is the real trade-off, not quality.*
+**Cost / latency per question:**
 
-> Caveat: the quick pass is **n=1 per test**. Objective results are sharp (the
-> pass/fail boundary is unambiguous), but the judged trading win needs repeats to
-> trust. Run the full 3-repeat battery for pass *rates*.
+| | objective pass | avg latency | avg model calls |
+|---|:--:|--:|--:|
+| opus | 100% | ~5s | 1 |
+| fusion | 100% | ~66s | 5 |
+| debate | 100% | ~121s | 9 |
+
+The headline trade-off: **fusion matched debate on every objective test for ~half
+the calls and ~half the wall-clock.** Debate's only edge appeared on the open-ended
+reasoning question, where the iterative critique produced an answer the blind judge
+preferred over both the single fuse and Opus.
+
+> Caveat: this is **n=1 per test**. Objective pass/fail is sharp, but the single
+> judged result is one sample — suggestive, not conclusive. Re-run with
+> `--repeats 3` for rates. (An earlier ad-hoc run had `is_valid_ipv4` *failing* for
+> the panel; see the blind-spot note below for why this run passed it.)
 
 ---
 
@@ -68,18 +92,28 @@ every result we saw:
 - **Fermi estimate** (NYC coffee-shop revenue): round-0 answers spanned a 3× range
   ($1.6B–$4.8B), then the debate visibly converged to a tight ~$2.1–2.2B cluster.
   Consensus' *shown work* was tighter than a single pass.
-- **Open-ended trading reasoning:** both identified "buy UP, latency arbitrage," but
-  Opus hedged ("possibly yes… far from automatic") while the consensus led with a
-  decisive, mechanism-named recommendation — and the neutral judge preferred it.
+- **Open-ended trading reasoning:** all approaches identified "buy UP, latency
+  arbitrage," but the blind judge preferred **debate** over *both* Opus and fusion —
+  the iterative critique produced the most decisive, mechanism-named answer. This is
+  the one place debate beat fusion, suggesting its edge is specific to open-ended
+  reasoning where positions get sharpened through back-and-forth.
 
-### Where Opus won (correlated blind spots)
-- **`is_valid_ipv4` — the signature finding.** Every panel we tried — including a
-  coding-specialized model and four diverse frontier reasoners — independently
-  reached for Python's `str.isdigit()`. That idiom is a trap: it returns `True` for
-  non-ASCII digits, so the validator **crashes** on `'1.2.3.²'` and **wrongly
-  accepts** fullwidth/Arabic digits. The models *agreed unanimously* on subtly buggy
-  code, and **two rounds of debate did not catch it** — because none of them saw the
-  problem. Opus used an explicit ASCII check and passed all cases.
+### The correlated blind spot — and that it's prompt-dependent
+- **`is_valid_ipv4` — the signature finding.** In an early, *underspecified* prompt
+  ("...no other characters"), every panel we tried — including a coding-specialized
+  model and four diverse frontier reasoners — independently reached for Python's
+  `str.isdigit()`. That idiom is a trap: it returns `True` for non-ASCII digits, so
+  the validator **crashes** on `'1.2.3.²'` and **wrongly accepts** fullwidth/Arabic
+  digits. The models *agreed unanimously* on subtly buggy code, and **two rounds of
+  debate did not catch it** — because none of them saw the problem. Opus, prompted
+  the same way, used an explicit ASCII check and passed.
+- **But the blind spot is an *attention* gap, not a knowledge gap.** In the
+  three-way benchmark the prompt added one clause — *"must never raise on any
+  input"* — and that cue was enough: fusion **and** debate both passed all 10
+  `is_valid_ipv4` cases. The models *know* `isdigit()` is unsafe; they just don't
+  apply that knowledge unless nudged. Takeaway: aggregation can't fix a blind spot
+  *no panelist sees*, but a small prompt cue can make them see it — cheaper and more
+  reliable than adding rounds.
 
 ### The probe that proved the mechanism: the car-wash trap
 *"I want to wash my car. The car wash is 100 ft away. Should I walk or drive?"* (You
@@ -98,18 +132,26 @@ that fell for it; diversity, not reasoning depth, is what saved the run.
 
 ## Practical takeaways
 
-1. **For correctness, diversify the panel by lineage.** Four models from four labs
+1. **Default to fusion; reach for debate selectively.** Fusion matched debate on
+   every objective test for ~half the cost and latency. Pay for debate's extra
+   rounds only when the task is open-ended reasoning (where it won the judged
+   question) or when you specifically want a dissent signal.
+2. **For correctness, diversify the panel by lineage.** Four models from four labs
    beat three strong-but-similar ones, because the failure mode you most need to
    defend against is the *shared* blind spot — and only diversity breaks it.
-2. **Unanimous ≠ correct.** Read consensus as "no panelist objected." Surface
+3. **Prompt for the blind spot.** A one-clause cue ("must never raise", "consider
+   adversarial input") flipped `is_valid_ipv4` from a unanimous failure to a clean
+   pass — cheaper and more reliable than more models or more rounds.
+4. **Agreement ≠ correct.** Read consensus as "no panelist objected." Surface
    dissent; treat agreement on anything subtle with healthy skepticism.
-3. **Use the right consensus rule.** `all` for verifiable questions; `majority`/`2/3`
-   for subjective ones (a strict `all` can report `no_consensus` even when the panel
-   substantively agrees).
-4. **Mind the cost curve.** ~10× the API calls and large wall-clock from reasoning
-   models. Great for *offline* analysis at open-weight pricing; the latency is
-   disqualifying for latency-sensitive live use (e.g. 5-minute binary trading).
-5. **Best of both:** put a frontier model *on* the panel as one voice — it can break
+5. **Use the right consensus rule (debate mode).** `all` for verifiable questions;
+   `majority`/`2/3` for subjective ones (a strict `all` can report `no_consensus`
+   even when the panel substantively agrees).
+6. **Mind the cost curve.** Fusion ~5 calls, debate ~9, vs 1 for a single model, plus
+   large wall-clock from reasoning models. Great for *offline* analysis at open-weight
+   pricing; the latency is disqualifying for latency-sensitive live use (e.g. 5-minute
+   binary trading).
+7. **Best of both:** put a frontier model *on* the panel as one voice — it can break
    the open-weight ecosystem's correlated blind spots while the others add diversity.
 
 ---

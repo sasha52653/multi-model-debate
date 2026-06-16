@@ -54,3 +54,56 @@ TIE (if they are equivalent)"""
         return "tie", out.strip()[:120]
     winner = a_is if token == "A" else b_is
     return winner, f"judge picked {token} ({winner})"
+
+
+def multi_judge(prompt, answers, rubric, judge_model, rotate=0):
+    """Blind judge among 2+ contestants. `answers` is {name: text}.
+
+    Presentation order is rotated by `rotate` (use the repeat index) so no contestant
+    sits in a fixed slot across repeats — neutralizes position bias. The judge picks
+    the single best response by letter; we map it back to the contestant name.
+    """
+    names = list(answers.keys())
+    if len(names) < 2:
+        return (names[0] if names else "tie"), "fewer than 2 contestants"
+    k = rotate % len(names)
+    order = names[k:] + names[:k]
+    letters = [chr(65 + i) for i in range(len(order))]  # A, B, C, ...
+
+    blocks = "\n\n".join(
+        f"--- Response {lab} ---\n{answers[nm]}" for lab, nm in zip(letters, order)
+    )
+    sys_msg = (
+        "You are an impartial judge comparing several answers to the same question. "
+        "Judge only on the rubric. Ignore length and style unless the rubric asks for "
+        "them. Do not favor any position; you do not know which system produced which."
+    )
+    user = f"""Question:
+{prompt}
+
+Judging rubric: {rubric}
+
+{blocks}
+
+Which single response is best on the rubric? Reply with EXACTLY one letter on its own line ({", ".join(letters)}), or TIE if they are equivalent."""
+
+    try:
+        out = openrouter.chat(
+            judge_model,
+            [{"role": "system", "content": sys_msg}, {"role": "user", "content": user}],
+            temperature=0,
+            max_tokens=2000,
+        )
+    except Exception as e:  # noqa: BLE001
+        return "tie", f"judge error: {e}"
+
+    # Scan for standalone tokens and take the LAST one that is a valid label or TIE.
+    # Taking the last avoids matching stray capitals in the judge's prose (e.g. the
+    # pronoun "I", or "A" in "A response"); the actual verdict comes at the end.
+    valid = set(letters)
+    tokens = re.findall(r"\b([A-Z]+)\b", (out or "").upper())
+    pick = next((t for t in reversed(tokens) if t in valid or t == "TIE"), None)
+    if pick is None or pick == "TIE":
+        return "tie", (out or "").strip()[-120:]
+    winner = order[letters.index(pick)]
+    return winner, f"judge picked {pick} -> {winner}"

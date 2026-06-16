@@ -21,15 +21,19 @@ A single model can be confidently wrong. Asking several *different* models the s
 question and making them argue surfaces disagreement, cancels one-off mistakes, and
 produces an answer no single model would give alone.
 
-We benchmarked it against a frontier model (Claude Opus 4.8). The headline:
+We benchmarked three approaches — a single frontier model (Claude Opus 4.8), a
+**fusion** of open-weight models (parallel answers + one aggregator), and a full
+**debate** to consensus. The headline:
 
-> A diverse open-weight panel reaches **near-parity with Opus on objective tasks
-> (89% vs 100%)** and can win open-ended judged questions — but **consensus only
-> cancels errors the models make *independently*. It is blind to errors they
-> *share*.** → [full results](docs/RESULTS.md)
+> On objective tasks, **all three tie at 100%** — a diverse open-weight panel matches
+> Opus. **Fusion ≈ debate in quality at ~half the cost**; debate's edge shows only on
+> open-ended reasoning (it won the blind-judged question). The shared limitation:
+> **aggregation cancels errors the models make *independently*, and is blind to ones
+> they *share*** — though a one-line prompt cue can make the panel see a blind spot it
+> would otherwise miss. → [full results](docs/RESULTS.md)
 
-That one rule predicts everything: diversify the panel by lineage, and never read
-unanimous agreement as "verified correct."
+So: diversify the panel by lineage, default to fusion for cost, reach for debate on
+hard reasoning, and never read agreement as "verified correct."
 
 ## How it works
 

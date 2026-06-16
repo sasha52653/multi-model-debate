@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
-"""Benchmark: a single frontier model (Opus) vs an open-weight debate consensus.
+"""Benchmark: a frontier model vs open-weight aggregation strategies.
 
-For each test, both contestants answer the same prompt under the same API:
-  - Opus:      one call to anthropic/claude-opus-4.8 via OpenRouter.
-  - Consensus: the debate engine over a diverse open-weight panel (--synthesize on).
+Three contestants answer the same prompt under the same API:
+  - opus   : one call to a single frontier model (anthropic/claude-opus-4.8).
+  - fusion : parallel independent answers from the panel, then ONE aggregator call
+             fuses them (no debate). Implemented as a 0-round synthesize.
+  - debate : the full debate engine — independent answers, then rounds of mutual
+             critique/revision until a consensus quorum, then synthesize.
 
-Objective tests are graded programmatically (exact/numeric/code/constraint). Subjective
-tests go to a blind, neutral judge model that never learns which answer is which.
-Each test is repeated N times (defaults to 3) because both contestants are stochastic;
-we report pass *rates*, plus a cost proxy (model calls) and wall-clock latency.
+Objective tests are graded programmatically; subjective tests go to a blind, neutral
+judge that ranks all contestants without knowing which is which. Each test repeats N
+times (contestants are stochastic). We report pass rates plus a cost proxy (model
+calls) and wall-clock latency per contestant.
 
 Usage:
     export OPENROUTER_API_KEY=sk-or-...
-    python run_benchmark.py                       # full battery, 3 repeats
-    python run_benchmark.py --tests rcount,roman --repeats 1   # quick subset
-    python run_benchmark.py --out results/run1    # where to write the scorecard
+    python run_benchmark.py                                  # all 3, all tests, 1 repeat
+    python run_benchmark.py --contestants fusion,debate      # head-to-head only
+    python run_benchmark.py --tests rcount,roman --repeats 1 # quick subset
 """
 
 import argparse
@@ -24,8 +27,6 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-# Put the package dir on the path so its modules import flat (openrouter/models/debate),
-# matching how debate.py's import fallback and judge.py expect them.
 PKG = os.path.join(HERE, "..", "multimodel_debate")
 sys.path.insert(0, PKG)
 sys.path.insert(0, HERE)
@@ -45,171 +46,153 @@ PANEL = [
 JUDGE = "google/gemini-2.5-pro"
 MAX_TOKENS = 4096
 
+# Contestant definitions. "fusion" = parallel answers + one aggregator (0 debate
+# rounds, synthesize on). "debate" = full debate to majority consensus + synthesize.
+CONTESTANTS = {
+    "opus": {"kind": "single"},
+    "fusion": {"kind": "panel", "max_rounds": 0, "consensus": "all", "synthesize": True},
+    "debate": {"kind": "panel", "max_rounds": 3, "consensus": "majority", "synthesize": True},
+}
 
-def opus_answer(prompt):
+
+def _answer(name, prompt, panel):
+    """Return (answer_text, latency_s, n_calls) for one contestant; never raises."""
+    spec = CONTESTANTS[name]
     t0 = time.time()
-    ans = openrouter.chat(
-        OPUS, [{"role": "user", "content": prompt}], temperature=0.7, max_tokens=MAX_TOKENS
-    )
-    return ans, time.time() - t0
+    try:
+        if spec["kind"] == "single":
+            ans = openrouter.chat(
+                OPUS, [{"role": "user", "content": prompt}], temperature=0.7, max_tokens=MAX_TOKENS
+            )
+            return ans, time.time() - t0, 1
+        res = run_debate(
+            prompt,
+            models=panel,
+            max_rounds=spec["max_rounds"],
+            consensus=spec["consensus"],
+            synthesize=spec["synthesize"],
+            max_tokens=MAX_TOKENS,
+        )
+        calls = len(panel) * (1 + res["rounds_used"]) + (1 if res["synthesized"] else 0)
+        return res["consensus_reply"], time.time() - t0, calls
+    except Exception as e:  # noqa: BLE001
+        return f"({name} error: {e})", time.time() - t0, 0
 
 
-def consensus_answer(prompt, panel, consensus_rule):
-    t0 = time.time()
-    res = run_debate(
-        prompt,
-        models=panel,
-        max_rounds=3,
-        consensus=consensus_rule,
-        synthesize=True,
-        max_tokens=MAX_TOKENS,
-    )
-    calls = len(panel) * (1 + res["rounds_used"]) + (1 if res["synthesized"] else 0)
-    return res["consensus_reply"], res, calls, time.time() - t0
-
-
-def run(tests, repeats, panel, consensus_rule, log):
+def run(tests, repeats, contestants, panel, log):
     rows = []
     for t in tests:
+        g = t["grader"]
         for r in range(repeats):
-            tag = f"{t['id']} (rep {r + 1}/{repeats})"
-            log(f"  running {tag} ...")
-            try:
-                opus, opus_lat = opus_answer(t["prompt"])
-            except Exception as e:  # noqa: BLE001
-                opus, opus_lat = f"(opus error: {e})", 0.0
-            cons, cres, calls, cons_lat = consensus_answer(t["prompt"], panel, consensus_rule)
+            log(f"  {t['id']} (rep {r + 1}/{repeats}) ...")
+            answers, latency, calls = {}, {}, {}
+            for name in contestants:
+                a, lat, c = _answer(name, t["prompt"], panel)
+                answers[name], latency[name], calls[name] = a, round(lat, 1), c
 
             row = {
-                "id": t["id"],
-                "category": t["category"],
-                "repeat": r,
-                "opus_latency_s": round(opus_lat, 1),
-                "consensus_latency_s": round(cons_lat, 1),
-                "consensus_calls": calls,
-                "consensus_status": cres["status"],
-                "consensus_rounds": cres["rounds_used"],
-                "opus_answer": opus,
-                "consensus_answer": cons,
+                "id": t["id"], "category": t["category"], "repeat": r,
+                "latency": latency, "calls": calls, "answers": answers,
             }
-
-            g = t["grader"]
             if g["type"] == "judge":
-                winner, detail = judge.blind_judge(
-                    t["prompt"], opus, cons, g["rubric"], JUDGE, swap=(r % 2 == 1)
-                )
+                winner, detail = judge.multi_judge(t["prompt"], answers, g["rubric"], JUDGE, rotate=r)
                 row.update(mode="judge", winner=winner, detail=detail)
                 log(f"    judge -> {winner}")
             else:
-                op_ok, op_d = graders.grade(opus, g)
-                co_ok, co_d = graders.grade(cons, g)
-                row.update(
-                    mode="objective",
-                    opus_pass=op_ok,
-                    consensus_pass=co_ok,
-                    opus_detail=op_d,
-                    consensus_detail=co_d,
-                )
-                log(f"    opus={'PASS' if op_ok else 'FAIL'}  consensus={'PASS' if co_ok else 'FAIL'}")
+                passes, details = {}, {}
+                for name in contestants:
+                    ok, d = graders.grade(answers[name], g)
+                    passes[name], details[name] = ok, d
+                row.update(mode="objective", passes=passes, details=details)
+                log("    " + "  ".join(f"{n}={'PASS' if passes[n] else 'FAIL'}" for n in contestants))
             rows.append(row)
     return rows
 
 
-def aggregate(rows):
+def aggregate(rows, contestants):
     cats = {}
     for row in rows:
         cats.setdefault(row["category"], []).append(row)
 
     summary = {"categories": {}, "overall": {}}
-    obj_opus, obj_cons = [], []
-    j_opus = j_cons = j_tie = 0
-    lat_opus, lat_cons, calls = [], [], []
+    obj = {c: [] for c in contestants}
+    jwins = {c: 0 for c in contestants}
+    jties = 0
+    lat = {c: [] for c in contestants}
+    calls = {c: [] for c in contestants}
 
     for cat, rs in cats.items():
         c = {"n": len(rs)}
-        objs = [r for r in rs if r["mode"] == "objective"]
-        jus = [r for r in rs if r["mode"] == "judge"]
+        objs = [x for x in rs if x["mode"] == "objective"]
+        jus = [x for x in rs if x["mode"] == "judge"]
         if objs:
-            o = sum(r["opus_pass"] for r in objs) / len(objs)
-            v = sum(r["consensus_pass"] for r in objs) / len(objs)
-            c["opus_pass_rate"] = round(o, 3)
-            c["consensus_pass_rate"] = round(v, 3)
-            obj_opus += [r["opus_pass"] for r in objs]
-            obj_cons += [r["consensus_pass"] for r in objs]
+            c["objective_pass_rate"] = {
+                name: round(sum(x["passes"][name] for x in objs) / len(objs), 3) for name in contestants
+            }
+            for name in contestants:
+                obj[name] += [x["passes"][name] for x in objs]
         if jus:
-            c["judge_opus_wins"] = sum(r["winner"] == "opus" for r in jus)
-            c["judge_consensus_wins"] = sum(r["winner"] == "consensus" for r in jus)
-            c["judge_ties"] = sum(r["winner"] == "tie" for r in jus)
-            j_opus += c["judge_opus_wins"]
-            j_cons += c["judge_consensus_wins"]
-            j_tie += c["judge_ties"]
-        c["avg_opus_latency_s"] = round(sum(r["opus_latency_s"] for r in rs) / len(rs), 1)
-        c["avg_consensus_latency_s"] = round(sum(r["consensus_latency_s"] for r in rs) / len(rs), 1)
-        c["avg_consensus_calls"] = round(sum(r["consensus_calls"] for r in rs) / len(rs), 1)
+            c["judge_wins"] = {name: sum(x["winner"] == name for x in jus) for name in contestants}
+            c["judge_ties"] = sum(x["winner"] == "tie" for x in jus)
+            for name in contestants:
+                jwins[name] += c["judge_wins"][name]
+            jties += c["judge_ties"]
+        for name in contestants:
+            lat[name] += [x["latency"][name] for x in rs]
+            calls[name] += [x["calls"][name] for x in rs]
         summary["categories"][cat] = c
-        lat_opus += [r["opus_latency_s"] for r in rs]
-        lat_cons += [r["consensus_latency_s"] for r in rs]
-        calls += [r["consensus_calls"] for r in rs]
 
     ov = summary["overall"]
-    if obj_opus:
-        ov["objective_opus_pass_rate"] = round(sum(obj_opus) / len(obj_opus), 3)
-        ov["objective_consensus_pass_rate"] = round(sum(obj_cons) / len(obj_cons), 3)
-        ov["objective_n"] = len(obj_opus)
-    if j_opus + j_cons + j_tie:
-        ov["judge_opus_wins"] = j_opus
-        ov["judge_consensus_wins"] = j_cons
-        ov["judge_ties"] = j_tie
-    ov["avg_opus_latency_s"] = round(sum(lat_opus) / len(lat_opus), 1)
-    ov["avg_consensus_latency_s"] = round(sum(lat_cons) / len(lat_cons), 1)
-    ov["avg_consensus_calls"] = round(sum(calls) / len(calls), 1)
-    ov["calls_ratio"] = f"{ov['avg_consensus_calls']:.0f}x Opus (1 call)"
+    if any(obj.values()):
+        ov["objective_pass_rate"] = {name: round(sum(obj[name]) / len(obj[name]), 3) for name in contestants}
+        ov["objective_n"] = len(next(iter(obj.values())))
+    if jwins.values() and (sum(jwins.values()) + jties):
+        ov["judge_wins"] = jwins
+        ov["judge_ties"] = jties
+    ov["avg_latency_s"] = {name: round(sum(lat[name]) / len(lat[name]), 1) for name in contestants}
+    ov["avg_calls"] = {name: round(sum(calls[name]) / len(calls[name]), 1) for name in contestants}
     return summary
 
 
 def to_markdown(summary, meta):
+    cs = meta["contestants"]
     L = [
-        "# Opus vs open-weight consensus — benchmark",
+        "# Frontier model vs open-weight aggregation — benchmark",
         "",
-        f"- **Opus:** `{meta['opus']}` (1 call/question)",
-        f"- **Consensus panel:** {', '.join(f'`{m}`' for m in meta['panel'])}",
-        f"- **Judge (subjective):** `{meta['judge']}`",
-        f"- **Repeats per test:** {meta['repeats']}  |  **Consensus rule:** {meta['consensus_rule']}",
+        f"- **Contestants:** {', '.join(f'`{c}`' for c in cs)}",
+        f"- **opus:** `{meta['opus']}` (1 call) · **panel (fusion/debate):** {', '.join(f'`{m}`' for m in meta['panel'])}",
+        f"- **fusion** = parallel answers + 1 aggregator (0 debate rounds) · **debate** = full debate to majority + synthesize",
+        f"- **Judge:** `{meta['judge']}`  |  **Repeats:** {meta['repeats']}",
         "",
-        "## Per-category",
+        "## Per-category (objective pass rate)",
         "",
-        "| Category | n | Opus pass | Consensus pass | Judge (O/C/T) | Opus lat | Cons lat | Cons calls |",
-        "|---|--:|--:|--:|:--:|--:|--:|--:|",
+        "| Category | n | " + " | ".join(cs) + " |",
+        "|---|--:|" + "|".join("--:" for _ in cs) + "|",
     ]
     for cat, c in summary["categories"].items():
-        op = f"{c['opus_pass_rate']*100:.0f}%" if "opus_pass_rate" in c else "—"
-        co = f"{c['consensus_pass_rate']*100:.0f}%" if "consensus_pass_rate" in c else "—"
-        jd = (
-            f"{c.get('judge_opus_wins',0)}/{c.get('judge_consensus_wins',0)}/{c.get('judge_ties',0)}"
-            if "judge_opus_wins" in c else "—"
-        )
-        L.append(
-            f"| {cat} | {c['n']} | {op} | {co} | {jd} | "
-            f"{c['avg_opus_latency_s']}s | {c['avg_consensus_latency_s']}s | {c['avg_consensus_calls']} |"
-        )
+        if "objective_pass_rate" in c:
+            cells = " | ".join(f"{c['objective_pass_rate'][n]*100:.0f}%" for n in cs)
+            L.append(f"| {cat} | {c['n']} | {cells} |")
+    # judged categories
+    judged = {cat: c for cat, c in summary["categories"].items() if "judge_wins" in c}
+    if judged:
+        L += ["", "## Judged categories (blind judge wins)", "", "| Category | " + " | ".join(cs) + " | tie |", "|---|" + "|".join(":-:" for _ in cs) + "|:-:|"]
+        for cat, c in judged.items():
+            cells = " | ".join(str(c["judge_wins"][n]) for n in cs)
+            L.append(f"| {cat} | {cells} | {c['judge_ties']} |")
+
     ov = summary["overall"]
     L += ["", "## Overall", ""]
-    if "objective_opus_pass_rate" in ov:
-        L.append(
-            f"- **Objective pass rate** ({ov['objective_n']} graded runs): "
-            f"Opus **{ov['objective_opus_pass_rate']*100:.0f}%** vs "
-            f"Consensus **{ov['objective_consensus_pass_rate']*100:.0f}%**"
-        )
-    if "judge_opus_wins" in ov:
-        L.append(
-            f"- **Blind judge:** Opus {ov['judge_opus_wins']} / "
-            f"Consensus {ov['judge_consensus_wins']} / Tie {ov['judge_ties']}"
-        )
-    L.append(
-        f"- **Cost/latency:** Opus ~{ov['avg_opus_latency_s']}s & 1 call; "
-        f"Consensus ~{ov['avg_consensus_latency_s']}s & ~{ov['avg_consensus_calls']} calls "
-        f"({ov['calls_ratio']})"
-    )
+    if "objective_pass_rate" in ov:
+        parts = " · ".join(f"**{n}** {ov['objective_pass_rate'][n]*100:.0f}%" for n in cs)
+        L.append(f"- **Objective pass rate** ({ov['objective_n']} graded runs/contestant): {parts}")
+    if "judge_wins" in ov:
+        parts = " · ".join(f"{n} {ov['judge_wins'][n]}" for n in cs)
+        L.append(f"- **Blind judge wins:** {parts} · tie {ov['judge_ties']}")
+    lat = " · ".join(f"{n} ~{ov['avg_latency_s'][n]}s" for n in cs)
+    cal = " · ".join(f"{n} ~{ov['avg_calls'][n]}" for n in cs)
+    L.append(f"- **Avg latency:** {lat}")
+    L.append(f"- **Avg model calls:** {cal}")
     return "\n".join(L)
 
 
@@ -217,17 +200,20 @@ def main(argv=None):
     global OPUS, JUDGE
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--tests", default="all", help="comma-separated test ids, or 'all'.")
-    p.add_argument("--repeats", type=int, default=3)
-    p.add_argument("--panel", default=",".join(PANEL), help="comma-separated consensus panel slugs.")
-    p.add_argument("--opus", default=OPUS, help="the frontier contestant model.")
-    p.add_argument("--judge", default=JUDGE, help="neutral judge model for subjective tests.")
-    p.add_argument("--consensus", default="majority", help="consensus rule for the panel.")
-    p.add_argument("--out", default=os.path.join(HERE, "results", "latest"), help="output dir prefix.")
+    p.add_argument("--repeats", type=int, default=1)
+    p.add_argument("--contestants", default="opus,fusion,debate", help="subset of: opus,fusion,debate")
+    p.add_argument("--panel", default=",".join(PANEL), help="panel slugs for fusion/debate.")
+    p.add_argument("--opus", default=OPUS)
+    p.add_argument("--judge", default=JUDGE)
+    p.add_argument("--out", default=os.path.join(HERE, "results", "comparison"))
     args = p.parse_args(argv)
 
     OPUS = args.opus
     JUDGE = args.judge
     panel = [s.strip() for s in args.panel.split(",") if s.strip()]
+    contestants = [c.strip() for c in args.contestants.split(",") if c.strip() in CONTESTANTS]
+    if not contestants:
+        raise SystemExit("no valid contestants (choose from opus,fusion,debate)")
 
     spec = json.load(open(os.path.join(HERE, "tests.json")))
     all_tests = spec["tests"]
@@ -238,27 +224,26 @@ def main(argv=None):
         raise SystemExit("no matching tests")
 
     log = lambda m: print(m, file=sys.stderr, flush=True)
-    log(f"Benchmark: {len(all_tests)} test(s) x {args.repeats} repeat(s) | Opus={OPUS} | panel={panel}")
+    log(f"Benchmark: {len(all_tests)} test(s) x {args.repeats} | contestants={contestants} | panel={panel}")
 
-    rows = run(all_tests, args.repeats, panel, args.consensus, log)
-    summary = aggregate(rows)
+    rows = run(all_tests, args.repeats, contestants, panel, log)
+    summary = aggregate(rows, contestants)
     meta = {
         "opus": OPUS, "panel": panel, "judge": JUDGE,
-        "repeats": args.repeats, "consensus_rule": args.consensus,
+        "repeats": args.repeats, "contestants": contestants,
     }
 
-    outdir = args.out
-    os.makedirs(outdir, exist_ok=True)
-    with open(os.path.join(outdir, "rows.json"), "w") as f:
+    os.makedirs(args.out, exist_ok=True)
+    with open(os.path.join(args.out, "rows.json"), "w") as f:
         json.dump(rows, f, indent=2, ensure_ascii=False)
-    with open(os.path.join(outdir, "scorecard.json"), "w") as f:
+    with open(os.path.join(args.out, "scorecard.json"), "w") as f:
         json.dump({"meta": meta, "summary": summary}, f, indent=2, ensure_ascii=False)
     md = to_markdown(summary, meta)
-    with open(os.path.join(outdir, "scorecard.md"), "w") as f:
+    with open(os.path.join(args.out, "scorecard.md"), "w") as f:
         f.write(md)
 
     print("\n" + md)
-    log(f"\nWrote {outdir}/scorecard.md, scorecard.json, rows.json")
+    log(f"\nWrote {args.out}/scorecard.md, scorecard.json, rows.json")
     return 0
 
 
