@@ -249,26 +249,41 @@ def run_debate(
     max_tokens=2048,
     system=None,
     synthesize=False,
+    mode="debate",
+    aggregator=None,
     on_event=None,
 ):
-    """Run a multi-model debate and return a result dict.
+    """Run a multi-model debate (or a single-pass fusion) and return a result dict.
 
     Parameters
     ----------
     prompt : str
     models : list[str] | str | None   panel slugs, a preset name, or None for default
-    max_rounds : int                  max debate rounds after the independent round
+    mode : "debate" | "fusion"        "debate" = independent answers, then rounds of
+                                      mutual critique/revision to consensus. "fusion"
+                                      = independent answers in parallel, then ONE
+                                      aggregator call fuses them (no debate rounds).
+                                      Fusion forces max_rounds=0 and synthesize=True.
+    aggregator : str | None           model used for the synthesize/fuse step;
+                                      defaults to the lead panel model.
+    max_rounds : int                  max debate rounds (ignored in fusion mode)
     consensus : str | int | float     stop rule: "all" | "majority" | a count like 2
-                                      | a fraction like "2/3" or 0.66 (see parse_consensus)
-    quorum : float | None             deprecated alias for `consensus` (a fraction);
-                                      if given, it overrides `consensus`
-    synthesize : bool                 if True, merge agreed answers into one reply
-                                      using the lead model (an optional extra call)
+                                      | a fraction like "2/3" or 0.66 (debate mode only)
+    quorum : float | None             deprecated alias for `consensus` (a fraction)
+    synthesize : bool                 if True, merge the final answers into one reply
+                                      via the aggregator (always on in fusion mode)
     on_event : callable(str) | None   progress callback for logging
     """
     panel = resolve_panel(models)
     if len(panel) < 2:
-        raise ValueError("Need at least 2 models to hold a debate.")
+        raise ValueError("Need at least 2 models on the panel.")
+
+    if mode == "fusion":
+        # Fusion = parallel independent answers + one aggregator. No debate.
+        max_rounds = 0
+        synthesize = True
+    elif mode != "debate":
+        raise ValueError(f"mode must be 'debate' or 'fusion', got {mode!r}")
 
     spec = quorum if quorum is not None else consensus
     rule = parse_consensus(spec)
@@ -306,6 +321,7 @@ def run_debate(
     if len(live) < 2:
         return {
             "status": "error",
+            "mode": mode,
             "error": "Fewer than 2 models produced an initial answer.",
             "panel": panel,
             "dropped": dropped,
@@ -379,39 +395,56 @@ def run_debate(
             log(f"  Consensus reached in round {rnd}.")
             break
 
-    # ---- Pick / build the consensus reply ----
+    # In fusion mode there is no consensus vote; success is simply having ≥2 answers
+    # to fuse. Relabel the status so callers don't misread it as a failed debate.
+    if mode == "fusion":
+        status = "fusion" if len(live) >= 2 else "error"
+
+    # ---- Pick / build the final reply ----
     # Lead model = first surviving panel member in original order.
     lead = next((m for m in panel if m in live), None)
+    agg_model = aggregator or lead
     consensus_reply = live.get(lead)
 
     if synthesize and consensus_reply is not None and len(live) >= 2:
-        log("Synthesizing final canonical reply from converged answers...")
+        if mode == "fusion":
+            log(f"Fusing {len(live)} independent answers via {agg_model}...")
+            sys_content = (
+                "You are an aggregator. Several models answered the same question "
+                "independently. Produce the single best answer: keep what they agree "
+                "on, adopt the strongest correct points, reconcile conflicts in favor "
+                "of the better-supported view, and drop errors and redundancy. Do not "
+                "merely concatenate."
+            )
+            user_label = "Independent answers"
+        else:
+            log(f"Synthesizing final canonical reply via {agg_model}...")
+            sys_content = (
+                "You are merging several near-identical converged answers from a "
+                "panel into one clean, complete final answer. Keep everything the "
+                "versions agree on, fold in any unique correct detail, drop "
+                "redundancy, and do not introduce new claims the versions did not make."
+            )
+            user_label = "Converged versions"
         labels = {m: _peer_label(i) for i, m in enumerate(live)}
         merged_block = "\n\n".join(
             f"### Version {labels[m]}\n{live[m].strip()}" for m in live
         )
         synth_msgs = [
-            {
-                "role": "system",
-                "content": (
-                    "You are merging several near-identical converged answers from a "
-                    "panel into one clean, complete final answer. Keep everything the "
-                    "versions agree on, fold in any unique correct detail, drop "
-                    "redundancy, and do not introduce new claims the versions did not make."
-                ),
-            },
+            {"role": "system", "content": sys_content},
             {
                 "role": "user",
-                "content": f"Original question:\n{prompt}\n\nConverged versions:\n{merged_block}\n\nProduce the single best merged final answer:",
+                "content": f"Original question:\n{prompt}\n\n{user_label}:\n{merged_block}\n\nProduce the single best final answer:",
             },
         ]
         try:
-            consensus_reply = openrouter.chat(lead, synth_msgs, temperature, max_tokens)
+            consensus_reply = openrouter.chat(agg_model, synth_msgs, temperature, max_tokens)
         except Exception as e:  # noqa: BLE001
-            log(f"  ! Synthesis failed ({e}); falling back to lead model's answer.")
+            log(f"  ! Aggregation failed ({e}); falling back to lead model's answer.")
 
     return {
         "status": status,
+        "mode": mode,
         "rounds_used": rounds_used,
         "consensus_rule": str(spec),
         "panel": panel,
@@ -420,10 +453,20 @@ def run_debate(
         "agreement": agreement,
         "consensus_reply": consensus_reply,
         "lead_model": lead,
+        "aggregator_model": agg_model if synthesize else None,
         "final_answers": dict(live),
         "synthesized": bool(synthesize),
         "transcript": transcript,
     }
+
+
+def run_fusion(prompt, models=None, aggregator=None, **kwargs):
+    """Convenience wrapper: parallel independent answers + one aggregator (no debate).
+
+    Equivalent to run_debate(..., mode="fusion"). Cheaper and faster than debate and,
+    in our benchmarks, matches it on objective tasks — see docs/RESULTS.md.
+    """
+    return run_debate(prompt, models=models, mode="fusion", aggregator=aggregator, **kwargs)
 
 
 def _print_models(query=None, free_only=False):
@@ -502,7 +545,19 @@ def main(argv=None):
         metavar="SUBSTR",
         help="Interactively choose the panel from the OpenRouter list (optional filter).",
     )
-    p.add_argument("--max-rounds", type=int, default=3, help="Max debate rounds (default 3).")
+    p.add_argument(
+        "--mode",
+        choices=["debate", "fusion"],
+        default="debate",
+        help="debate = rounds of mutual critique to consensus (default); "
+        "fusion = parallel independent answers + one aggregator, no debate.",
+    )
+    p.add_argument(
+        "--aggregator",
+        metavar="SLUG",
+        help="Model that fuses/synthesizes the final answer (default: lead panel model).",
+    )
+    p.add_argument("--max-rounds", type=int, default=3, help="Max debate rounds (default 3; ignored in fusion mode).")
     p.add_argument(
         "--consensus",
         default="all",
@@ -559,6 +614,8 @@ def main(argv=None):
         max_tokens=args.max_tokens,
         system=args.system,
         synthesize=args.synthesize,
+        mode=args.mode,
+        aggregator=args.aggregator,
         on_event=log,
     )
 

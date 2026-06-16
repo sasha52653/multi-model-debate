@@ -13,6 +13,16 @@
         "description": "Panel selection: a preset ('default', 'cheap', 'reasoning') or a comma-separated list of OpenRouter model slugs.",
         "default": "default"
       },
+      "mode": {
+        "type": "string",
+        "enum": ["debate", "fusion"],
+        "description": "'debate' = rounds of mutual critique to consensus. 'fusion' = parallel independent answers fused by one aggregator (no debate; ~half the cost, matches debate on objective tasks).",
+        "default": "debate"
+      },
+      "aggregator": {
+        "type": "string",
+        "description": "Optional OpenRouter slug for the model that fuses/synthesizes the final answer. Defaults to the lead panel model."
+      },
       "max_rounds": {
         "type": "integer",
         "description": "Maximum number of debate rounds after the independent first round.",

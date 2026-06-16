@@ -33,6 +33,9 @@ def main():
     p = argparse.ArgumentParser(description="Run a multi-model debate and emit JSON.")
     p.add_argument("prompt", nargs="?", help="The question (omit if using --json-stdin).")
     p.add_argument("--panel", default="default", help="preset name, comma slugs, or list.")
+    p.add_argument("--mode", choices=["debate", "fusion"], default="debate",
+                   help="debate (default) | fusion (parallel answers + one aggregator).")
+    p.add_argument("--aggregator", default=None, help="model that fuses the final answer.")
     p.add_argument("--max-rounds", type=int, default=3)
     p.add_argument("--consensus", default="majority", help="all | majority | count | fraction")
     p.add_argument("--synthesize", action="store_true")
@@ -44,18 +47,22 @@ def main():
         cfg = json.load(sys.stdin)
         prompt = cfg["prompt"]
         panel = cfg.get("panel", args.panel)
+        mode = cfg.get("mode", args.mode)
+        aggregator = cfg.get("aggregator", args.aggregator)
         max_rounds = cfg.get("max_rounds", args.max_rounds)
         consensus = cfg.get("consensus", args.consensus)
         synthesize = cfg.get("synthesize", args.synthesize)
     else:
         if not args.prompt:
             p.error("provide a prompt or use --json-stdin")
-        prompt, panel, max_rounds = args.prompt, args.panel, args.max_rounds
-        consensus, synthesize = args.consensus, args.synthesize
+        prompt, panel, mode, aggregator = args.prompt, args.panel, args.mode, args.aggregator
+        max_rounds, consensus, synthesize = args.max_rounds, args.consensus, args.synthesize
 
     result = run_debate(
         prompt,
         models=panel,
+        mode=mode,
+        aggregator=aggregator,
         max_rounds=max_rounds,
         consensus=consensus,
         synthesize=synthesize,
@@ -66,6 +73,7 @@ def main():
     else:
         out = {
             "consensus_reply": result["consensus_reply"],
+            "mode": result.get("mode"),
             "reached_consensus": result["status"] == "consensus",
             "status": result["status"],
             "rounds_used": result["rounds_used"],

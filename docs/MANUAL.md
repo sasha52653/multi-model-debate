@@ -47,7 +47,9 @@ cat question.md | python -m multimodel_debate -   # read prompt from stdin
 | `--list-models [SUBSTR]` | print the live OpenRouter catalogue (optional filter) and exit | — |
 | `--free-only` | with `--list-models`/`--pick`, show only zero-priced models | off |
 | `--pick [SUBSTR]` | interactively choose the panel by number | — |
-| `--max-rounds N` | cap on debate rounds | 3 |
+| `--mode {debate,fusion}` | `debate` = rounds of critique to consensus; `fusion` = parallel answers + one aggregator (no debate) | `debate` |
+| `--aggregator SLUG` | model that fuses/synthesizes the final answer | lead panel model |
+| `--max-rounds N` | cap on debate rounds (ignored in fusion mode) | 3 |
 | `--consensus RULE` | `all` / `majority` / a count (`2`) / a fraction (`2/3`, `0.66`) | `all` |
 | `--quorum F` | deprecated fractional alias for `--consensus` | — |
 | `--synthesize` | merge converged answers into one canonical reply | off |
@@ -56,6 +58,26 @@ cat question.md | python -m multimodel_debate -   # read prompt from stdin
 | `--json FILE` | write the full result dict to a file | — |
 | `--full` | print the whole result dict to stdout instead of just the reply | off |
 | `--quiet` | suppress stderr progress | off |
+
+## Modes: debate vs fusion
+
+```bash
+mmdebate "..."                 # debate (default): rounds of critique to consensus
+mmdebate "..." --mode fusion   # fusion: parallel answers + one aggregator, no debate
+mmdebate "..." --mode fusion --aggregator deepseek/deepseek-v3.2   # choose the fuser
+```
+
+- **debate** — independent answers, then mutual critique/revision until a consensus
+  quorum, then synthesize. Best for hard, open-ended reasoning, and it surfaces a
+  dissent signal.
+- **fusion** — independent answers in parallel, then one aggregator model fuses them
+  (forces `--max-rounds 0 --synthesize`). ~5 calls vs debate's ~9, and roughly half
+  the wall-clock. In the benchmark it **matched debate on every objective test**, so
+  it's the cheaper sensible default; debate's edge showed only on the open-ended
+  judged question. See [RESULTS.md](RESULTS.md).
+
+`fusion` reports `status: "fusion"` and `rounds_used: 0`. `--aggregator` works in both
+modes (default: the lead panel model).
 
 ## Choosing the panel
 
@@ -96,13 +118,16 @@ are clamped to the models still live, so "3 of 4" still resolves if one drops ou
 ## Python API
 
 ```python
-from multimodel_debate import run_debate, list_models
+from multimodel_debate import run_debate, run_fusion, list_models
 
+# debate mode
 result = run_debate(
     prompt="Your question",
     models="reasoning",        # preset, comma string, or list of slugs
+    mode="debate",            # "debate" (default) | "fusion"
     max_rounds=3,
     consensus="majority",      # "all" | "majority" | "2" | "2/3" | 0.66
+    aggregator=None,          # model that writes the final answer (default: lead)
     temperature=0.7,
     max_tokens=2048,
     system=None,
@@ -110,6 +135,10 @@ result = run_debate(
     on_event=print,            # progress callback(str)
 )
 print(result["consensus_reply"])
+
+# fusion mode — parallel answers + one aggregator, no debate (cheaper)
+fused = run_fusion("Your question", models="reasoning", aggregator="deepseek/deepseek-v3.2")
+print(fused["consensus_reply"])   # fused["status"] == "fusion"
 
 # discovery
 models = list_models(query="kimi", free_only=False)
@@ -122,9 +151,11 @@ models = list_models(query="kimi", free_only=False)
 
 ```jsonc
 {
-  "status": "consensus" | "no_consensus" | "error",
+  "status": "consensus" | "no_consensus" | "fusion" | "error",
+  "mode": "debate" | "fusion",
   "rounds_used": 2,
   "consensus_rule": "majority",
+  "aggregator_model": "...",          // model that wrote the final answer (if synthesized)
   "panel": ["...", "..."],            // requested panel
   "live_models": ["..."],             // survived to the end
   "dropped": { "model": "reason" },   // errors or "empty response"

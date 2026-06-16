@@ -92,7 +92,24 @@ Presets live in `scripts/models.py` (edit to change defaults):
 - `cheap` — small 7–12B models for budget/high-volume runs.
 - `reasoning` — R1 / Qwen3-thinking heavy panel for hard analytical questions.
 
-### Setting the rounds and the consensus rule
+### Two modes: debate vs fusion
+```bash
+python scripts/debate.py "..."                         # mode=debate (default)
+python scripts/debate.py "..." --mode fusion           # parallel answers + one aggregator, no debate
+python scripts/debate.py "..." --mode fusion --aggregator deepseek/deepseek-v3.2   # pick the fuser
+```
+- **debate** (default) — models answer, then critique/revise each other over rounds
+  until a consensus quorum. Best for hard reasoning or when you want a dissent signal.
+- **fusion** — models answer independently in parallel, then one aggregator model
+  fuses them into a single answer (no debate). ~Half the cost/latency of debate, and
+  in our benchmarks it **matches debate on objective tasks** (see
+  [references/integration.md](references/integration.md) / the project's RESULTS).
+  Prefer fusion as the cheaper default; reach for debate on open-ended reasoning.
+
+In both modes, `--aggregator SLUG` chooses the model that writes the final answer
+(default: the lead panel model).
+
+### Setting the rounds and the consensus rule (debate mode)
 ```bash
 python scripts/debate.py "..." --max-rounds 4          # cap on debate rounds (default 3)
 

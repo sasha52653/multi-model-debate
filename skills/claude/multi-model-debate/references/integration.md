@@ -9,11 +9,15 @@ loops, MCP servers, cron jobs) and the exact shape of what it returns.
 from debate import run_debate   # if scripts/ is on sys.path
 # or: from multi_model_debate.scripts.debate import run_debate
 
+# For cheap single-pass aggregation instead of debate, use run_fusion (see below).
+
 result = run_debate(
     prompt="Your question here",
     models="default",          # preset name, comma string, or list of slugs
+    mode="debate",            # "debate" (default) | "fusion"
     max_rounds=3,              # debate rounds after the independent round
     consensus="all",          # "all" | "majority" | a count (2) | a fraction ("2/3", 0.66)
+    aggregator=None,          # model that writes the final answer (default: lead panel model)
     temperature=0.7,
     max_tokens=2048,
     system=None,              # optional custom system prompt for all models
@@ -27,6 +31,17 @@ print(result["consensus_reply"])
 `consensus` accepts the same forms as the `--consensus` CLI flag. The floor is
 always 2 models, and counts/fractions are clamped to the models still live.
 (`quorum=<float>` is kept as a deprecated alias that overrides `consensus`.)
+
+### Fusion mode (cheaper alternative to debate)
+
+```python
+from debate import run_fusion
+# parallel independent answers + one aggregator, no debate rounds
+result = run_fusion("Your question", models="reasoning", aggregator="deepseek/deepseek-v3.2")
+print(result["consensus_reply"])     # result["status"] == "fusion", rounds_used == 0
+```
+Equivalent to `run_debate(..., mode="fusion")`. ~half the calls/latency of debate and
+matches it on objective tasks in our benchmark; debate's edge is open-ended reasoning.
 
 ### Discovering models
 
@@ -47,7 +62,8 @@ API key is missing.
 
 ```jsonc
 {
-  "status": "consensus" | "no_consensus" | "error",
+  "status": "consensus" | "no_consensus" | "fusion" | "error",
+  "mode": "debate" | "fusion",
   "rounds_used": 2,                      // debate rounds actually run
   "consensus_rule": "all",               // the stop rule as given ("all"/"majority"/"2"/"2/3"...)
   "panel": ["meta-llama/...", "qwen/...", ...],   // requested panel

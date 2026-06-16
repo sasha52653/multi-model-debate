@@ -50,8 +50,8 @@ MAX_TOKENS = 4096
 # rounds, synthesize on). "debate" = full debate to majority consensus + synthesize.
 CONTESTANTS = {
     "opus": {"kind": "single"},
-    "fusion": {"kind": "panel", "max_rounds": 0, "consensus": "all", "synthesize": True},
-    "debate": {"kind": "panel", "max_rounds": 3, "consensus": "majority", "synthesize": True},
+    "fusion": {"kind": "panel", "mode": "fusion"},
+    "debate": {"kind": "panel", "mode": "debate", "max_rounds": 3, "consensus": "majority", "synthesize": True},
 }
 
 
@@ -68,9 +68,10 @@ def _answer(name, prompt, panel):
         res = run_debate(
             prompt,
             models=panel,
-            max_rounds=spec["max_rounds"],
-            consensus=spec["consensus"],
-            synthesize=spec["synthesize"],
+            mode=spec.get("mode", "debate"),
+            max_rounds=spec.get("max_rounds", 3),
+            consensus=spec.get("consensus", "majority"),
+            synthesize=spec.get("synthesize", True),
             max_tokens=MAX_TOKENS,
         )
         calls = len(panel) * (1 + res["rounds_used"]) + (1 if res["synthesized"] else 0)
