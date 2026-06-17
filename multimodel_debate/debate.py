@@ -38,6 +38,8 @@ the full schema.
 """
 
 import argparse
+import difflib
+import itertools
 import json
 import math
 import re
@@ -284,12 +286,20 @@ def run_debate(
     if len(panel) < 2:
         raise ValueError("Need at least 2 models on the panel.")
 
+    if mode == "moa":
+        # Iterated Mixture-of-Agents: every model re-synthesizes all answers each
+        # round until they converge or stop changing. Handled by run_moa.
+        return run_moa(
+            prompt, models=panel, max_rounds=max_rounds, temperature=temperature,
+            max_tokens=max_tokens, system=system, allow_abstain=allow_abstain,
+            on_event=on_event,
+        )
     if mode == "fusion":
         # Fusion = parallel independent answers + one aggregator. No debate.
         max_rounds = 0
         synthesize = True
     elif mode != "debate":
-        raise ValueError(f"mode must be 'debate' or 'fusion', got {mode!r}")
+        raise ValueError(f"mode must be 'debate', 'fusion', or 'moa', got {mode!r}")
 
     spec = quorum if quorum is not None else consensus
     rule = parse_consensus(spec)
@@ -485,6 +495,156 @@ def run_fusion(prompt, models=None, aggregator=None, **kwargs):
     return run_debate(prompt, models=models, mode="fusion", aggregator=aggregator, **kwargs)
 
 
+def _sim(a, b):
+    """Lexical similarity in [0,1] via stdlib difflib (keeps the zero-dep promise)."""
+    return difflib.SequenceMatcher(None, (a or "").strip(), (b or "").strip()).ratio()
+
+
+def _mean_pairwise_sim(answers):
+    """Mean similarity over all pairs — how much the panel currently agrees."""
+    if len(answers) < 2:
+        return 1.0
+    sims = [_sim(a, b) for a, b in itertools.combinations(answers, 2)]
+    return sum(sims) / len(sims)
+
+
+def _medoid(items):
+    """Return the (key, answer) whose answer is most similar to all the others —
+    the most representative answer, used as the converged reply."""
+    keys = list(items)
+    if len(keys) == 1:
+        return keys[0], items[keys[0]]
+    best_k, best_score = keys[0], -1.0
+    for k in keys:
+        score = sum(_sim(items[k], items[o]) for o in keys if o != k)
+        if score > best_score:
+            best_k, best_score = k, score
+    return best_k, items[best_k]
+
+
+def _arbiter_messages(prompt, answers_block, system, allow_abstain):
+    sys_content = system or (
+        "You are one of several experts independently arbitrating. You are shown the "
+        "panel's current answers to a question. Produce the single best answer to the "
+        "ORIGINAL question by reconciling them: keep what they agree on, adopt the "
+        "strongest correct points, resolve conflicts toward the best-supported view, "
+        "and drop errors and redundancy. Output only that answer, not a critique."
+    )
+    if allow_abstain:
+        sys_content += (
+            " If the answers conflict, are uncertain, or hedge — no answer the panel "
+            "clearly supports — reply EXACTLY 'I don't know.' Do not guess or fabricate."
+        )
+    user = (
+        f"Original question:\n{prompt}\n\n"
+        f"The panel's current answers:\n{answers_block}\n\n"
+        "Your synthesized best answer:"
+    )
+    return [{"role": "system", "content": sys_content}, {"role": "user", "content": user}]
+
+
+def run_moa(
+    prompt,
+    models=None,
+    max_rounds=4,
+    agree_threshold=0.9,
+    stable_threshold=0.97,
+    temperature=0.7,
+    max_tokens=2048,
+    system=None,
+    allow_abstain=False,
+    on_event=None,
+):
+    """Iterated Mixture-of-Agents: every model re-synthesizes ALL current answers
+    each round (each acts as an arbiter), repeated until the answers converge to each
+    other (mean pairwise similarity >= agree_threshold) or stop changing round-to-round
+    (mean self-similarity >= stable_threshold), or max_rounds is hit.
+
+    Differs from debate (where each model revises only its own position) — here every
+    answer is a fusion of the whole set, so information mixes faster but agreement
+    pressure is stronger. Returns the medoid (most representative) answer.
+    """
+    panel = resolve_panel(models)
+    if len(panel) < 2:
+        raise ValueError("Need at least 2 models on the panel.")
+
+    def log(m):
+        if on_event:
+            on_event(m)
+
+    # Round 0: independent answers.
+    log(f"Round 0: {len(panel)} models answering independently...")
+    base = _initial_messages(prompt, system)
+    r0 = _run_parallel(
+        {m: (lambda m=m: openrouter.chat(m, base, temperature, max_tokens)) for m in panel},
+        max_workers=len(panel),
+    )
+    cur, dropped = {}, {}
+    for m in panel:
+        res = r0[m]
+        if isinstance(res, Exception) or not (res or "").strip():
+            dropped[m] = "round-0 failure" if isinstance(res, Exception) else "empty response"
+        else:
+            cur[m] = res
+    transcript = [{"round": 0, "answers": dict(cur)}]
+    if len(cur) < 2:
+        return {"status": "error", "mode": "moa", "panel": panel, "dropped": dropped,
+                "rounds_used": 0, "consensus_reply": next(iter(cur.values()), None),
+                "final_answers": cur, "transcript": transcript}
+
+    status, rounds_used, convergence = "no_consensus", 0, []
+    for rnd in range(1, max_rounds + 1):
+        rounds_used = rnd
+        live = list(cur.keys())
+        labels = {m: _peer_label(i) for i, m in enumerate(live)}
+        block = "\n\n".join(f"### Answer {labels[m]}\n{cur[m].strip()}" for m in live)
+        log(f"Round {rnd}: {len(live)} models arbitrating over all answers...")
+        results = _run_parallel(
+            {m: (lambda m=m: openrouter.chat(
+                m, _arbiter_messages(prompt, block, system, allow_abstain), temperature, max_tokens))
+             for m in live},
+            max_workers=len(live),
+        )
+        new = {}
+        for m in live:
+            res = results[m]
+            if isinstance(res, Exception) or not (res or "").strip():
+                dropped[m] = f"round-{rnd} failure"
+            else:
+                new[m] = res
+        transcript.append({"round": rnd, "answers": dict(new)})
+        if len(new) < 2:
+            log("  Panel collapsed below 2 live models; stopping.")
+            break
+        mutual = _mean_pairwise_sim(list(new.values()))
+        stability = sum(_sim(new[m], cur[m]) for m in new if m in cur) / max(1, len(new))
+        convergence.append({"round": rnd, "mutual_sim": round(mutual, 3), "stability": round(stability, 3)})
+        log(f"  agreement={mutual:.2f}  change-from-last={1 - stability:.2f}")
+        cur = new
+        if mutual >= agree_threshold:
+            status = "consensus"
+            log(f"  Converged (agreement {mutual:.2f} >= {agree_threshold}).")
+            break
+        if stability >= stable_threshold:
+            log(f"  Fixed point (answers stopped changing).")
+            break
+
+    lead, reply = _medoid(cur)
+    return {
+        "status": status,
+        "mode": "moa",
+        "rounds_used": rounds_used,
+        "panel": panel,
+        "live_models": list(cur.keys()),
+        "dropped": dropped,
+        "convergence": convergence,
+        "consensus_reply": reply,
+        "lead_model": lead,
+        "final_answers": dict(cur),
+        "transcript": transcript,
+    }
+
+
 def _print_models(query=None, free_only=False):
     """Print the OpenRouter catalogue (optionally filtered) as an aligned table."""
     rows = openrouter.list_models(query=query, free_only=free_only)
@@ -563,10 +723,12 @@ def main(argv=None):
     )
     p.add_argument(
         "--mode",
-        choices=["debate", "fusion"],
+        choices=["debate", "fusion", "moa"],
         default="debate",
         help="debate = rounds of mutual critique to consensus (default); "
-        "fusion = parallel independent answers + one aggregator, no debate.",
+        "fusion = parallel answers + one aggregator; "
+        "moa = iterated Mixture-of-Agents (every model re-synthesizes all answers each "
+        "round until they converge or stop changing).",
     )
     p.add_argument(
         "--aggregator",

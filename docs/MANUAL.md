@@ -65,20 +65,28 @@ cat question.md | python -m multimodel_debate -   # read prompt from stdin
 ```bash
 mmdebate "..."                 # debate (default): rounds of critique to consensus
 mmdebate "..." --mode fusion   # fusion: parallel answers + one aggregator, no debate
+mmdebate "..." --mode moa      # iterated Mixture-of-Agents to convergence
 mmdebate "..." --mode fusion --aggregator deepseek/deepseek-v3.2   # choose the fuser
 ```
 
-- **debate** — independent answers, then mutual critique/revision until a consensus
-  quorum, then synthesize. Best for hard, open-ended reasoning, and it surfaces a
+- **debate** — independent answers, then mutual critique/revision of *each model's own*
+  position until a consensus quorum, then synthesize. Best for hard reasoning / a
   dissent signal.
-- **fusion** — independent answers in parallel, then one aggregator model fuses them
-  (forces `--max-rounds 0 --synthesize`). ~5 calls vs debate's ~9, and roughly half
-  the wall-clock. In the benchmark it **matched debate on every objective test**, so
-  it's the cheaper sensible default; debate's edge showed only on the open-ended
-  judged question. See [RESULTS.md](RESULTS.md).
+- **fusion** — independent answers in parallel, then one aggregator fuses them (forces
+  `--max-rounds 0 --synthesize`). ~5 calls vs debate's ~9. **Matched debate on every
+  objective test** — the cheaper sensible default. Reports `status: "fusion"`.
+- **moa** — iterated Mixture-of-Agents (`run_moa`): *every* model re-synthesizes *all*
+  current answers each round, repeated until they converge (mean pairwise similarity ≥
+  `agree_threshold`, default 0.9) or stop changing (`stable_threshold`, default 0.97),
+  up to `--max-rounds`. Returns the medoid (most representative) answer plus a
+  `convergence` trace. Information mixes fastest but agreement pressure is strongest.
+  **Caveat:** convergence uses stdlib lexical similarity (`difflib`), which fits
+  short/factual answers; on long prose, similar-in-substance answers score low, so it
+  usually runs to `--max-rounds` and returns the medoid. Semantic/judge-based
+  convergence would need extra deps — not built in.
 
-`fusion` reports `status: "fusion"` and `rounds_used: 0`. `--aggregator` works in both
-modes (default: the lead panel model).
+`--aggregator` works in debate/fusion (default: lead panel model); `--allow-abstain`
+works across all three (in moa, each arbiter may abstain).
 
 ## Choosing the panel
 

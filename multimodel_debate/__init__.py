@@ -8,7 +8,7 @@ Public API:
     resolve_panel(spec) -> list[str]
 """
 
-from .debate import run_debate, run_fusion, parse_consensus, describe_consensus
+from .debate import run_debate, run_fusion, run_moa, parse_consensus, describe_consensus
 from .openrouter import chat, list_models, OpenRouterError
 from .models import resolve_panel, DEFAULT_PANEL, CHEAP_PANEL, REASONING_PANEL, PRESETS
 
@@ -16,6 +16,7 @@ __version__ = "0.1.0"
 __all__ = [
     "run_debate",
     "run_fusion",
+    "run_moa",
     "parse_consensus",
     "describe_consensus",
     "chat",

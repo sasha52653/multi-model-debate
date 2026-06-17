@@ -92,19 +92,24 @@ Presets live in `scripts/models.py` (edit to change defaults):
 - `cheap` — small 7–12B models for budget/high-volume runs.
 - `reasoning` — R1 / Qwen3-thinking heavy panel for hard analytical questions.
 
-### Two modes: debate vs fusion
+### Three modes: debate / fusion / moa
 ```bash
 python scripts/debate.py "..."                         # mode=debate (default)
 python scripts/debate.py "..." --mode fusion           # parallel answers + one aggregator, no debate
+python scripts/debate.py "..." --mode moa              # iterated Mixture-of-Agents to convergence
 python scripts/debate.py "..." --mode fusion --aggregator deepseek/deepseek-v3.2   # pick the fuser
 ```
-- **debate** (default) — models answer, then critique/revise each other over rounds
-  until a consensus quorum. Best for hard reasoning or when you want a dissent signal.
-- **fusion** — models answer independently in parallel, then one aggregator model
-  fuses them into a single answer (no debate). ~Half the cost/latency of debate, and
-  in our benchmarks it **matches debate on objective tasks** (see
-  [references/integration.md](references/integration.md) / the project's RESULTS).
-  Prefer fusion as the cheaper default; reach for debate on open-ended reasoning.
+- **debate** (default) — models answer, then critique/revise *their own* position over
+  rounds until a consensus quorum. Best for hard reasoning or a dissent signal.
+- **fusion** — models answer independently, then one aggregator fuses them (no debate).
+  ~Half the cost/latency of debate and **matches it on objective tasks** in our
+  benchmarks. The cheaper default.
+- **moa** — iterated Mixture-of-Agents: *every* model re-synthesizes *all* answers each
+  round (each is an arbiter), repeated until the answers converge or stop changing.
+  Information mixes fastest, but agreement pressure is strongest (most groupthink-prone).
+  Convergence is detected by lexical similarity, which suits short/factual answers; on
+  long prose it typically runs to `--max-rounds` and returns the most representative
+  (medoid) answer.
 
 In both modes, `--aggregator SLUG` chooses the model that writes the final answer
 (default: the lead panel model). Add **`--allow-abstain`** to let that aggregator
