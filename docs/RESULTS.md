@@ -239,5 +239,45 @@ native calibration no aggregation scheme matched.
 
 ---
 
+## Iterated Mixture-of-Agents (`moa`): elegant, but the worst for calibration
+
+A fourth strategy: every model re-synthesizes *all* current answers each round (each
+acts as an arbiter), iterated until convergence — `--mode moa` / `run_moa`. Compared
+against the others:
+
+**Objective set:** moa scores **100%** on all 9 categories — ties opus/fusion/debate.
+No differentiation (these tasks are easy for the panel regardless of method).
+
+**SimpleQA hallucination (four-way):**
+
+| | hallucinated (forced) | hallucinated (+abstain) | abstain helped |
+|---|--:|--:|:--:|
+| single | 13% | 13% | — |
+| fusion | 80% | **7%** | −73 pts |
+| debate | 53% | 47% | −6 pts |
+| opus | 0% | 0% | — |
+| **moa** | **73%** | **53%** | −20 pts |
+
+(moa costs ~14 model calls/question — the most of any method.)
+
+**The decisive finding — abstention needs visible disagreement.** Allowing the
+aggregator to abstain *rescued fusion completely* (80→7%) but barely dented moa
+(73→53%) or debate (53→47%). The mechanism:
+
+> Abstention only works when the aggregator sees genuine disagreement. Fusion shows it
+> the raw, conflicting independent answers, so it correctly says "I don't know." moa
+> and debate **manufacture agreement before the final answer** (through iteration /
+> rounds), so by synthesis time the inputs *look* concurring and the abstain
+> instruction can't fire.
+
+**moa is strictly dominated:** it ties on objective tasks (so does everything), it's
+the most expensive, and its iteration actively destroys the disagreement signal that
+makes calibration possible. It buys slightly more correctness (20–27%, like debate)
+at a steep hallucination cost. The iterated-arbiter design is elegant, but the very
+mixing that makes it converge fast also fabricates the false consensus that suppresses
+honest abstention. **Fusion + `allow_abstain` remains the sweet spot.**
+
+---
+
 *Generated from the session that built this project. Re-run the benchmark to refresh
 the numbers; the qualitative findings are reproducible with the prompts named above.*

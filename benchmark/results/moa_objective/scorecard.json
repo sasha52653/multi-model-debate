@@ -1,0 +1,91 @@
+{
+  "meta": {
+    "opus": "anthropic/claude-opus-4.8",
+    "panel": [
+      "qwen/qwen3-235b-a22b-2507",
+      "deepseek/deepseek-r1-0528",
+      "moonshotai/kimi-k2.5",
+      "z-ai/glm-5"
+    ],
+    "judge": "google/gemini-2.5-pro",
+    "repeats": 1,
+    "contestants": [
+      "moa"
+    ]
+  },
+  "summary": {
+    "categories": {
+      "counting-gotcha": {
+        "n": 1,
+        "objective_pass_rate": {
+          "moa": 1.0
+        }
+      },
+      "false-premise": {
+        "n": 1,
+        "objective_pass_rate": {
+          "moa": 1.0
+        }
+      },
+      "arithmetic-reasoning": {
+        "n": 1,
+        "objective_pass_rate": {
+          "moa": 1.0
+        }
+      },
+      "factual-recall": {
+        "n": 2,
+        "objective_pass_rate": {
+          "moa": 1.0
+        }
+      },
+      "code-correctness": {
+        "n": 1,
+        "objective_pass_rate": {
+          "moa": 1.0
+        }
+      },
+      "code-correlated-blindspot": {
+        "n": 1,
+        "objective_pass_rate": {
+          "moa": 1.0
+        }
+      },
+      "constraint-following": {
+        "n": 1,
+        "objective_pass_rate": {
+          "moa": 1.0
+        }
+      },
+      "long-context-faithfulness": {
+        "n": 1,
+        "objective_pass_rate": {
+          "moa": 1.0
+        }
+      },
+      "domain-reasoning": {
+        "n": 1,
+        "judge_wins": {
+          "moa": 1
+        },
+        "judge_ties": 0
+      }
+    },
+    "overall": {
+      "objective_pass_rate": {
+        "moa": 1.0
+      },
+      "objective_n": 9,
+      "judge_wins": {
+        "moa": 1
+      },
+      "judge_ties": 0,
+      "avg_latency_s": {
+        "moa": 182.6
+      },
+      "avg_calls": {
+        "moa": 12.8
+      }
+    }
+  }
+}

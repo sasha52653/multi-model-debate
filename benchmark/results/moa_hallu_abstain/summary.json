@@ -1,0 +1,11 @@
+{
+  "simpleqa": {
+    "moa": {
+      "n": 15,
+      "correct_pct": 26.7,
+      "hallucinated_pct": 53.3,
+      "abstained_pct": 20.0,
+      "avg_calls": 12.8
+    }
+  }
+}

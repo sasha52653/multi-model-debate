@@ -74,7 +74,7 @@ def answer_panel(q, mode, allow_abstain=False):
         allow_abstain=allow_abstain,
         max_tokens=MAX_TOKENS,
     )
-    calls = len(PANEL) * (1 + res["rounds_used"]) + (1 if res["synthesized"] else 0)
+    calls = len(PANEL) * (1 + res.get("rounds_used", 0)) + (1 if res.get("synthesized") else 0)
     return res["consensus_reply"] or "", calls
 
 
@@ -83,10 +83,8 @@ def get_answer(contestant, q, allow_abstain=False):
         return answer_single(SINGLE, q), 1
     if contestant == "opus":
         return answer_single(OPUS, q), 1
-    if contestant == "fusion":
-        return answer_panel(q, "fusion", allow_abstain)
-    if contestant == "debate":
-        return answer_panel(q, "debate", allow_abstain)
+    if contestant in ("fusion", "debate", "moa"):
+        return answer_panel(q, contestant, allow_abstain)
     raise ValueError(contestant)
 
 

@@ -52,6 +52,7 @@ CONTESTANTS = {
     "opus": {"kind": "single"},
     "fusion": {"kind": "panel", "mode": "fusion"},
     "debate": {"kind": "panel", "mode": "debate", "max_rounds": 3, "consensus": "majority", "synthesize": True},
+    "moa": {"kind": "panel", "mode": "moa", "max_rounds": 4},
 }
 
 
@@ -74,7 +75,7 @@ def _answer(name, prompt, panel):
             synthesize=spec.get("synthesize", True),
             max_tokens=MAX_TOKENS,
         )
-        calls = len(panel) * (1 + res["rounds_used"]) + (1 if res["synthesized"] else 0)
+        calls = len(panel) * (1 + res.get("rounds_used", 0)) + (1 if res.get("synthesized") else 0)
         return res["consensus_reply"], time.time() - t0, calls
     except Exception as e:  # noqa: BLE001
         return f"({name} error: {e})", time.time() - t0, 0
