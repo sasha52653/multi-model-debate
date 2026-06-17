@@ -107,7 +107,10 @@ python scripts/debate.py "..." --mode fusion --aggregator deepseek/deepseek-v3.2
   Prefer fusion as the cheaper default; reach for debate on open-ended reasoning.
 
 In both modes, `--aggregator SLUG` chooses the model that writes the final answer
-(default: the lead panel model).
+(default: the lead panel model). Add **`--allow-abstain`** to let that aggregator
+reply "I don't know" when the panel's answers conflict or hedge — important for
+factual questions, where forcing a committed answer turns honest uncertainty into
+confident hallucination (it cut fusion's hallucination rate ~12× in testing).
 
 ### Setting the rounds and the consensus rule (debate mode)
 ```bash

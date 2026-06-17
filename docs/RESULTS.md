@@ -204,13 +204,38 @@ Caveats: n=15/source, single repeat, and `single` is the abstention-prone Llama-
 absolute numbers are noisy, but the direction (fusion 80% vs single 13%) is far too
 large to be noise.
 
-### Design implication
+### Fix: abstention-aware aggregation (`allow_abstain`)
 
-The aggregator must be allowed to abstain. The current synthesize/fuse prompt says
-"produce the single best final answer," which forces commitment. Letting the
-aggregator return "I don't know" when the panel's answers conflict or hedge should
-recover the single model's low hallucination rate. This is a concrete, testable next
-step — not yet implemented.
+The diagnosis above predicted the fix: let the aggregator return "I don't know" when
+the panel's answers conflict or hedge, instead of forcing commitment. This is now
+implemented as `run_debate(..., allow_abstain=True)` / `--allow-abstain`. Re-running
+the SimpleQA half with it on:
+
+| contestant | hallucinated: before → **after** | abstained: before → after |
+|---|--:|--:|
+| single | 13% → 13% | 87% → 87% |
+| **fusion** | 80% → **7%** | 7% → 87% |
+| debate | 53% → **47%** | 20% → 27% |
+| opus | 0% → 0% | 87% → 87% |
+
+**Fusion: solved.** Abstention-aware fusion cut hallucination 80% → 7% (12×),
+recovering the cautious single-model / Opus profile. *So multi-model reduces
+hallucination only if the aggregator may abstain* — forced to commit it is
+catastrophic.
+
+**Debate: barely moved (53% → 47%) — a deeper flaw.** Even permitted to abstain,
+debate keeps committing to wrong answers, because its rounds manufacture a
+*confident-looking agreed answer before synthesis*. The aggregator sees concurring
+inputs and commits; fusion's raw conflicting answers correctly trigger abstention.
+Debate's own convergence pressure (the same herding seen elsewhere) defeats
+calibration. A debate-specific remedy would have to abstain on *measured* panel
+disagreement, not the aggregator's read of the (falsely) converged answers.
+
+**Residual trade-off.** fusion+abstain is *safe* but adds little over one cautious
+model on facts the panel doesn't know (7% correct). debate+abstain gets more correct
+(27%, the back-and-forth surfaces knowledge some members hold) but stays poorly
+calibrated (47% hallucinated). **Opus still wins outright** — 0% hallucinated via
+native calibration no aggregation scheme matched.
 
 ---
 

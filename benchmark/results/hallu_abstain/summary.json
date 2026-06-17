@@ -1,0 +1,32 @@
+{
+  "simpleqa": {
+    "single": {
+      "n": 15,
+      "correct_pct": 0.0,
+      "hallucinated_pct": 13.3,
+      "abstained_pct": 86.7,
+      "avg_calls": 1.0
+    },
+    "fusion": {
+      "n": 15,
+      "correct_pct": 6.7,
+      "hallucinated_pct": 6.7,
+      "abstained_pct": 86.7,
+      "avg_calls": 5.0
+    },
+    "debate": {
+      "n": 15,
+      "correct_pct": 26.7,
+      "hallucinated_pct": 46.7,
+      "abstained_pct": 26.7,
+      "avg_calls": 13.0
+    },
+    "opus": {
+      "n": 15,
+      "correct_pct": 13.3,
+      "hallucinated_pct": 0.0,
+      "abstained_pct": 86.7,
+      "avg_calls": 1.0
+    }
+  }
+}

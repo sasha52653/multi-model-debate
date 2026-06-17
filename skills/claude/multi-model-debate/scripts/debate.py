@@ -251,6 +251,7 @@ def run_debate(
     synthesize=False,
     mode="debate",
     aggregator=None,
+    allow_abstain=False,
     on_event=None,
 ):
     """Run a multi-model debate (or a single-pass fusion) and return a result dict.
@@ -266,6 +267,11 @@ def run_debate(
                                       Fusion forces max_rounds=0 and synthesize=True.
     aggregator : str | None           model used for the synthesize/fuse step;
                                       defaults to the lead panel model.
+    allow_abstain : bool              if True, the aggregator may answer "I don't know"
+                                      when the panel's answers conflict or hedge, instead
+                                      of being forced to commit. Cuts hallucination on
+                                      questions the panel doesn't actually know — see
+                                      docs/RESULTS.md.
     max_rounds : int                  max debate rounds (ignored in fusion mode)
     consensus : str | int | float     stop rule: "all" | "majority" | a count like 2
                                       | a fraction like "2/3" or 0.66 (debate mode only)
@@ -426,6 +432,16 @@ def run_debate(
                 "redundancy, and do not introduce new claims the versions did not make."
             )
             user_label = "Converged versions"
+        if allow_abstain:
+            # Without this, the aggregator is forced to commit and converts honest
+            # panel uncertainty into confident fabrication (see docs/RESULTS.md).
+            sys_content += (
+                " Crucially: if the answers conflict with each other, are uncertain, "
+                "or hedge — i.e. there is no answer the panel clearly agrees on and "
+                "supports — reply with EXACTLY 'I don't know.' Do not guess, average, "
+                "or fabricate. Give a definite answer only when the answers genuinely "
+                "concur."
+            )
         labels = {m: _peer_label(i) for i, m in enumerate(live)}
         merged_block = "\n\n".join(
             f"### Version {labels[m]}\n{live[m].strip()}" for m in live
@@ -557,6 +573,12 @@ def main(argv=None):
         metavar="SLUG",
         help="Model that fuses/synthesizes the final answer (default: lead panel model).",
     )
+    p.add_argument(
+        "--allow-abstain",
+        action="store_true",
+        help="Let the aggregator answer 'I don't know' when the panel conflicts/hedges "
+        "instead of committing (cuts hallucination on questions the panel doesn't know).",
+    )
     p.add_argument("--max-rounds", type=int, default=3, help="Max debate rounds (default 3; ignored in fusion mode).")
     p.add_argument(
         "--consensus",
@@ -616,6 +638,7 @@ def main(argv=None):
         synthesize=args.synthesize,
         mode=args.mode,
         aggregator=args.aggregator,
+        allow_abstain=args.allow_abstain,
         on_event=log,
     )
 

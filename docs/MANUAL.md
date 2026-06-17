@@ -49,6 +49,7 @@ cat question.md | python -m multimodel_debate -   # read prompt from stdin
 | `--pick [SUBSTR]` | interactively choose the panel by number | — |
 | `--mode {debate,fusion}` | `debate` = rounds of critique to consensus; `fusion` = parallel answers + one aggregator (no debate) | `debate` |
 | `--aggregator SLUG` | model that fuses/synthesizes the final answer | lead panel model |
+| `--allow-abstain` | aggregator may reply "I don't know" when the panel conflicts/hedges (cuts hallucination — see RESULTS) | off |
 | `--max-rounds N` | cap on debate rounds (ignored in fusion mode) | 3 |
 | `--consensus RULE` | `all` / `majority` / a count (`2`) / a fraction (`2/3`, `0.66`) | `all` |
 | `--quorum F` | deprecated fractional alias for `--consensus` | — |

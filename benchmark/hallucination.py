@@ -63,7 +63,7 @@ def answer_single(model, q):
     return openrouter.chat(model, [{"role": "user", "content": _prompt(q)}], max_tokens=MAX_TOKENS)
 
 
-def answer_panel(q, mode):
+def answer_panel(q, mode, allow_abstain=False):
     res = run_debate(
         _prompt(q),
         models=PANEL,
@@ -71,21 +71,22 @@ def answer_panel(q, mode):
         max_rounds=3,
         consensus="majority",
         synthesize=True,
+        allow_abstain=allow_abstain,
         max_tokens=MAX_TOKENS,
     )
     calls = len(PANEL) * (1 + res["rounds_used"]) + (1 if res["synthesized"] else 0)
     return res["consensus_reply"] or "", calls
 
 
-def get_answer(contestant, q):
+def get_answer(contestant, q, allow_abstain=False):
     if contestant == "single":
         return answer_single(SINGLE, q), 1
     if contestant == "opus":
         return answer_single(OPUS, q), 1
     if contestant == "fusion":
-        return answer_panel(q, "fusion")
+        return answer_panel(q, "fusion", allow_abstain)
     if contestant == "debate":
-        return answer_panel(q, "debate")
+        return answer_panel(q, "debate", allow_abstain)
     raise ValueError(contestant)
 
 
@@ -93,20 +94,27 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--contestants", default="single,fusion,debate,opus")
     p.add_argument("--tests", default=os.path.join(HERE, "hallu_tests.json"))
+    p.add_argument("--sources", default="", help="comma-separated source filter, e.g. 'simpleqa'.")
+    p.add_argument("--allow-abstain", action="store_true",
+                   help="run fusion/debate with abstention-aware aggregation.")
     p.add_argument("--out", default=os.path.join(HERE, "results", "hallu"))
     args = p.parse_args()
 
     items = json.load(open(args.tests))["items"]
+    if args.sources:
+        want = {s.strip() for s in args.sources.split(",")}
+        items = [it for it in items if it["source"] in want]
     contestants = [c.strip() for c in args.contestants.split(",") if c.strip()]
     log = lambda m: print(m, file=sys.stderr, flush=True)
-    log(f"Hallucination eval: {len(items)} items x {len(contestants)} contestants | panel={PANEL}")
+    log(f"Hallucination eval: {len(items)} items x {len(contestants)} contestants "
+        f"| allow_abstain={args.allow_abstain} | panel={PANEL}")
 
     rows = []
     for it in items:
         for c in contestants:
             t0 = time.time()
             try:
-                ans, calls = get_answer(c, it["question"])
+                ans, calls = get_answer(c, it["question"], args.allow_abstain)
             except Exception as e:  # noqa: BLE001
                 ans, calls = f"(error: {e})", 0
             verdict, detail = hallu_grader.grade_factual(
