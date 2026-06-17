@@ -35,6 +35,9 @@ We benchmarked three approaches — a single frontier model (Claude Opus 4.8), a
 So: diversify the panel by lineage, default to fusion for cost, reach for debate on
 hard reasoning, and never read agreement as "verified correct."
 
+A short write-up of the findings — including the hallucination result and the
+abstention/disagreement mechanism — is in **[docs/PAPER.md](docs/PAPER.md)**.
+
 ## How it works
 
 1. **Round 0 — independent answers.** Every model answers blind to the others.
