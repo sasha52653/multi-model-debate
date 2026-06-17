@@ -156,5 +156,63 @@ that fell for it; diversity, not reasoning depth, is what saved the run.
 
 ---
 
+## Does aggregation reduce hallucinations? No — on hard facts it makes them worse
+
+Run with [`benchmark/hallucination.py`](../benchmark/hallucination.py) over 30 real
+items (15 [SimpleQA](https://openai.com/index/introducing-simpleqa/) obscure facts +
+15 [TruthfulQA](https://github.com/sylinrl/TruthfulQA) misconceptions), graded
+three-way by a neutral model (`google/gemini-2.5-pro`): **correct / hallucinated /
+abstained**. Panel = Llama-3.3-70B, Qwen3-235B, DeepSeek-V3.2, Mistral-Large;
+`single` = Llama-3.3-70B alone. Each contestant was told it may answer "I don't know".
+
+**SimpleQA (obscure facts):**
+
+| contestant | correct | hallucinated | abstained |
+|---|--:|--:|--:|
+| single | 0% | 13% | 87% |
+| fusion | 13% | **80%** | 7% |
+| debate | 27% | **53%** | 20% |
+| opus | 13% | **0%** | 87% |
+
+**TruthfulQA (misconceptions):** all contestants **0% hallucination**; correctness
+single 73% → fusion 87% → debate 100% → opus 93%.
+
+### Findings
+
+1. **Aggregation amplified hallucination instead of reducing it.** Fusion took the
+   single model's 13% hallucination rate to **80%**. The mechanism is in the
+   abstention column: the cautious single model abstains 87% of the time on facts it
+   doesn't know, but **the aggregator/synthesis step is prompted to produce an
+   answer**, converting honest "I don't know" into confident fabrication. Abstention
+   collapsed 87%→7%; hallucination exploded. Empirically, **hallucination ≈
+   (1 − abstention)**.
+2. **Why the uncorrelated-error logic fails here.** Consensus cancels *votable*
+   errors, but on open-ended factual recall the correct output is *abstention*, and
+   aggregation destroys it. The "cancel uncorrelated mistakes" principle assumes every
+   model emits a committable answer — false when the right move is not to answer.
+3. **Debate hallucinates less than fusion (53% vs 80%)** because a dissenting "I don't
+   know" can survive the rounds, whereas fusion's aggregator simply commits. Debate is
+   the less-harmful aggregator, still far worse than leaving the cautious model alone.
+4. **Opus wins decisively: 0% hallucination on both sets** via calibrated abstention —
+   a real frontier-model advantage (knowing when *not* to answer).
+5. **Where aggregation helps: accuracy when the knowledge is present.** On TruthfulQA,
+   debate reached 100% (vs single 73%) with zero hallucination. Consensus improves
+   correctness when the panel actually knows the answer — it just can't manufacture
+   missing knowledge without fabricating.
+
+Caveats: n=15/source, single repeat, and `single` is the abstention-prone Llama-70B —
+absolute numbers are noisy, but the direction (fusion 80% vs single 13%) is far too
+large to be noise.
+
+### Design implication
+
+The aggregator must be allowed to abstain. The current synthesize/fuse prompt says
+"produce the single best final answer," which forces commitment. Letting the
+aggregator return "I don't know" when the panel's answers conflict or hedge should
+recover the single model's low hallucination rate. This is a concrete, testable next
+step — not yet implemented.
+
+---
+
 *Generated from the session that built this project. Re-run the benchmark to refresh
 the numbers; the qualitative findings are reproducible with the prompts named above.*
